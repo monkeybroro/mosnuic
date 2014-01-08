@@ -1,0 +1,206 @@
+#!/usr/bin/python
+
+import os,sys,Image,time,shutil,optparse,ImageStat,imghdr
+import preprocessing,split,analyze,compose,bi_compare
+
+#time measure starts           
+start=time.time()
+
+#error messages
+usage_info='''
+	./mosnuic file1 dir2 [-o file3] [-r n4]
+
+	file1 is a Linux path for an existing file that contains
+    	the target image.
+
+    	dir2 is a Linux path for an existing directory that
+    	contains the tiles.
+
+    	file3 is a Linux path for the image file to be created.
+
+    	n4 is the maximum number of times a tile may be used.
+'''
+target_format_err='''
+The target image (file1) must be in one of the following formats:
+        BMP    (bitmap image file)
+        GIF    (Graphics Interchange Format)
+        JPEG   (Joint Photographic Experts Group)
+        PNG    (Portable Network Graphics)
+        TIFF   (Tagged Image File Format)
+'''
+repeat_err='''
+n4 must be an unsigned integer
+'''
+
+#optparse module to parse arguments
+parser=optparse.OptionParser(add_help_option=False,usage=usage_info)
+
+#callback functions to check duplicate options
+def check_o(option, opt_str, value, parser):
+   if parser.values.o:
+      print "error: duplicate option '-o'."
+      sys.exit()
+   else:
+      parser.values.o = value
+def check_r(option, opt_str, value, parser):
+   if parser.values.r:
+      print "error: duplicate option '-r'."
+      sys.exit()
+   else:
+      parser.values.r = value
+
+#add options
+parser.add_option("-o", type="string", \
+                  action='callback',callback=check_o, \
+                  help="Linux path for the image file to be created")
+parser.add_option("-r",type=int, \
+                  action='callback',callback=check_r, \
+                  help="The maximum number of times a tile may be used")
+
+#get the options and arguments
+options,args = parser.parse_args()
+
+#arguments check
+if not (len(args) ==2 and \
+        os.path.isfile(args[0]) and \
+        os.path.isdir(args[1])):
+    print usage_info
+    sys.exit()
+
+#target image format check
+target_format = imghdr.what(args[0])
+if not target_format in \
+        ['jpeg','bmp','tiff','gif','png']:
+	print target_format_err
+        sys.exit()
+
+#extract suffix of target image
+file1 = os.path.splitext(args[0])
+target=args[0]
+pool=args[1]
+
+if options.o ==  target:
+    print 'Error: output path can not be the same as target image!'
+    sys.exit()
+
+if options.o and (options.o == '~' or os.path.isdir(options.o)):
+    print 'Error: output path can not be directory!' 
+    sys.exit()
+
+#decide the path of the output image    
+out_type=0   
+if options.o and os.path.splitext(options.o)[1] in \
+   ['.jpg','.jpeg','.bmp','.tiff','.gif','.png']:
+    out=options.o
+    out_type=1
+elif options.o:
+    out=options.o
+    out_type=2
+else:
+    out=file1[0]+"_out"+file1[1]
+    out_type=3
+
+#decide repeat_time
+if options.r and options.r > 0:
+    repeat_time=options.r
+elif options.r == 0:
+    repeat_time=options.r
+elif options.r:
+    print repeat_err
+    sys.exit()
+else:    
+    repeat_time=2e9
+
+#extract the median color of target image
+try:
+    img=Image.open(target)
+    brightness=ImageStat.Stat(img.convert('L')).median[0]
+except (KeyboardInterrupt, Exception), e:
+    print e
+    sys.exit()
+
+#covert target image to canonical form: TIFF
+canonical_form = '.tiff'
+canon=0
+try:
+    if not target_format == 'tiff':  
+        while(os.path.exists('/tmp/canonical'+str(canon)+canonical_form)):
+          canon+=1
+        target='/tmp/canonical'+str(canon)+canonical_form    
+        img.convert('RGB').save(target)   
+except (KeyboardInterrupt, Exception), e:
+    print e
+    if os.path.exists(target):
+        os.remove(target)
+    sys.exit()
+
+#preprocessing
+try:
+    target_size,tile_size=preprocessing.prepro(target,pool,repeat_time,canon)
+except (KeyboardInterrupt, Exception), e:
+    print e
+    if os.path.exists(target):
+        os.remove(target)
+    sys.exit()
+
+#crop the target image due to the tile dimension
+try:
+    bri={}
+    target_rgb={}
+    split.split(target,tile_size,bri,target_rgb)
+except (KeyboardInterrupt, Exception), e:
+    print e
+    if os.path.exists(target):
+        os.remove(target) 
+    sys.exit()
+else:
+    if os.path.exists(target):
+        os.remove(target)
+
+#calculate average color of each tile image
+try:
+    tile_rgb={}
+    analyze.analyze(pool,tile_rgb)
+except (KeyboardInterrupt, Exception), e:
+    print e
+    sys.exit()
+
+#find closest tile for each piece using binary search
+try:
+    subs={}
+    bi_compare.compare(tile_rgb,target_rgb,repeat_time,brightness,bri,subs)
+except (KeyboardInterrupt, Exception), e:
+    print e
+    sys.exit()
+
+#compose the mosaic
+try:
+    temp_out = 0
+    while(os.path.exists('/tmp/temp_out'+str(temp_out)+'.jpg')):
+          temp_out+=1
+    out_name='/tmp/temp_out'+str(temp_out)+'.jpg'
+    compose.compose(subs,out_name,target_size,tile_size)
+except (KeyboardInterrupt, Exception), e:
+    print e
+    if os.path.exists(out_name):
+        os.remove(out_name)
+    sys.exit()
+
+#rename output and delete temp input and output
+try:
+    img=Image.open(out_name)  
+    if out_type == 1:
+        img.save(out)
+    else:
+        img.save(out+'.'+target_format)
+        os.rename(out+'.'+target_format,out)              
+except (KeyboardInterrupt, Exception), e:
+    print e
+    if os.path.exists(out_name):
+        os.remove(out_name)
+else:
+    if os.path.exists(out_name):
+        os.remove(out_name)
+
+#time measure ends
+#print "Total time is: " + str(time.time()-start) + " seconds."

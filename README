@@ -1,0 +1,9 @@
+TEAM MEMBER
+yuan liu: zoe.liangss@hotmail.com
+lei wang: wang.lei1@husky.neu.edu
+hang shao: shao.ha@husky.neu.edu
+yongnan zhou: zhou.yo@husky.neu.edu
+
+HOW TO RUN
+1.Put the source code files into a certain directory
+2.Run the command: ./mosnuic file1 dir2 [-o file3] [-r n4]
